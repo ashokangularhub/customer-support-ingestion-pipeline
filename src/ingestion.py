@@ -7,27 +7,57 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_weaviate import WeaviateVectorStore
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from weaviate.classes.query import Filter
 import weaviate
 
-from chunking import build_documents
-from config import BATCH_SIZE, EMBEDDING_MODEL, INCOMING_FOLDER, INDEX_NAME
-from weaviate_schema import build_schema, ensure_collection, reset_collection
+from chunking import build_documents, compute_file_hash
+from config import (
+    ALL_COLLECTIONS,
+    BATCH_SIZE,
+    EMBEDDING_MODEL,
+    INCOMING_FOLDER,
+    detect_doc_type,
+    get_collection_name,
+)
+from weaviate_schema import (
+    build_schema,
+    ensure_all_collections,
+    ensure_collection,
+    reset_all_collections,
+)
 
 load_dotenv()
 
 SUPPORTED_EXTENSIONS = {".pdf"}
 
 
-def _get_vectorstore(client) -> WeaviateVectorStore:
-    ensure_collection(client, INDEX_NAME)
+def _get_vectorstore(client, index_name: str) -> WeaviateVectorStore:
+    ensure_collection(client, index_name)
     embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
     return WeaviateVectorStore(
         client=client,
-        index_name=INDEX_NAME,
+        index_name=index_name,
         embedding=embeddings,
         text_key="text",
-        schema=build_schema(INDEX_NAME),
+        schema=build_schema(index_name),
     )
+
+
+def _already_ingested(client, index_name: str, source_file: str, file_hash: str) -> bool:
+    if not client.collections.exists(index_name):
+        return False
+    collection = client.collections.get(index_name)
+    where = Filter.by_property("source_file").equal(source_file) & \
+        Filter.by_property("file_hash").equal(file_hash)
+    return collection.aggregate.over_all(total_count=True, filters=where).total_count > 0
+
+
+def _delete_stale_chunks(client, index_name: str, source_file: str) -> None:
+    if not client.collections.exists(index_name):
+        return
+    collection = client.collections.get(index_name)
+    collection.data.delete_many(
+        where=Filter.by_property("source_file").equal(source_file))
 
 
 def ingest_file(file_path: str, client=None) -> None:
@@ -36,16 +66,30 @@ def ingest_file(file_path: str, client=None) -> None:
         print(f"Skipping unsupported file type: {file_path}")
         return
 
-    print(f"Ingesting {file_path} ...")
-    docs = build_documents(file_path)
-    if not docs:
-        print(f"  No content extracted from {file_path}")
-        return
+    file_name = os.path.basename(file_path)
+    doc_type, _ = detect_doc_type(file_name)
+    index_name = get_collection_name(doc_type)
+    file_hash = compute_file_hash(file_path)
 
     owns_client = client is None
     client = client or weaviate.connect_to_local()
     try:
-        vectorstore = _get_vectorstore(client)
+        if _already_ingested(client, index_name, file_name, file_hash):
+            print(f"Skipping {file_name} — already ingested into "
+                  f"{index_name} (unchanged since last run)")
+            return
+
+        print(f"Ingesting {file_path} -> collection {index_name} ...")
+        docs = build_documents(file_path)
+        if not docs:
+            print(f"  No content extracted from {file_path}")
+            return
+
+        # File changed (or is being re-ingested after edits) — drop any
+        # previously indexed chunks for it before writing the fresh ones.
+        _delete_stale_chunks(client, index_name, file_name)
+
+        vectorstore = _get_vectorstore(client, index_name)
 
         total = len(docs)
         table_count = sum(
@@ -62,8 +106,8 @@ def ingest_file(file_path: str, client=None) -> None:
             print(f"  Batch {start // BATCH_SIZE + 1}: indexed "
                   f"{min(start + BATCH_SIZE, total)}/{total} chunks")
 
-        print(f"Successfully indexed {total} chunks from "
-              f"{os.path.basename(file_path)}")
+        print(f"Successfully indexed {total} chunks from {file_name} "
+              f"into {index_name}")
     finally:
         if owns_client:
             client.close()
@@ -74,9 +118,9 @@ def ingest_existing_files(reset: bool = False) -> None:
     client = weaviate.connect_to_local()
     try:
         if reset:
-            print(f"Resetting collection: {INDEX_NAME}")
-            reset_collection(client)
-        ensure_collection(client, INDEX_NAME)
+            print(f"Resetting collections: {', '.join(ALL_COLLECTIONS)}")
+            reset_all_collections(client)
+        ensure_all_collections(client)
 
         for name in sorted(os.listdir(INCOMING_FOLDER)):
             path = os.path.join(INCOMING_FOLDER, name)
@@ -112,7 +156,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Aurora RAG ingestion pipeline")
     parser.add_argument("--reset", action="store_true",
-                        help="Delete and recreate the Weaviate collection before ingesting")
+                        help="Delete and recreate the Weaviate collections before ingesting")
     parser.add_argument("--watch", action="store_true",
                         help="Keep watching the folder for new files after the initial ingest")
     args = parser.parse_args()

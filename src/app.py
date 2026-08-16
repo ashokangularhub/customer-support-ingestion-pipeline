@@ -3,14 +3,15 @@ from contextlib import asynccontextmanager
 
 from typing import List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from admin_api import router as admin_router
+from config import ALL_COLLECTIONS, DEFAULT_TOP_K
 from ingestion import ingest_existing_files, start_watcher
-from query import ask_question
+from query import search
 
 
 @asynccontextmanager
@@ -25,9 +26,12 @@ app.include_router(admin_router)
 app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
 
 
-class QueryRequest(BaseModel):
+class RetrieveRequest(BaseModel):
     question: str
+    # Required until a routing agent picks the collection automatically.
+    collection: str  # one of config.ALL_COLLECTIONS, e.g. "AURORA_PRODUCT"
     search_type: str = "hybrid"  # "keyword", "vector", or "hybrid"
+    k: int = DEFAULT_TOP_K
 
 
 class ContextChunk(BaseModel):
@@ -41,12 +45,10 @@ class ContextChunk(BaseModel):
     text: str
 
 
-class QueryResponse(BaseModel):
-    system_prompt: str
-    context: List[ContextChunk]
+class RetrieveResponse(BaseModel):
     question: str
     search_type: str
-    answer: str
+    context: List[ContextChunk]
 
 
 @app.get("/health")
@@ -59,10 +61,19 @@ def root():
     return RedirectResponse(url="/ui/")
 
 
-@app.post("/query", response_model=QueryResponse)
-def query(request: QueryRequest):
-    result = ask_question(request.question, search_type=request.search_type)
-    return QueryResponse(**result)
+@app.post("/retrieve", response_model=RetrieveResponse)
+def retrieve(request: RetrieveRequest):
+    """Search primitive consumed by the rag-retrieval service: returns the
+    matching chunks (vector/keyword/hybrid) with no LLM call involved.
+    """
+    if request.collection not in ALL_COLLECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"collection must be one of {ALL_COLLECTIONS}, got {request.collection!r}")
+    context = search(request.question, collection=request.collection,
+                     search_type=request.search_type, k=request.k)
+    return RetrieveResponse(
+        question=request.question, search_type=request.search_type, context=context)
 
 
 if __name__ == "__main__":

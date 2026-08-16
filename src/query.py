@@ -1,11 +1,8 @@
-import os
-
 import weaviate
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
-from config import EMBEDDING_MODEL, INDEX_NAME
+from config import ALL_COLLECTIONS, DEFAULT_TOP_K, EMBEDDING_MODEL
 
 load_dotenv()
 
@@ -14,16 +11,6 @@ HYBRID_ALPHA = 0.75
 
 BM25_QUERY_PROPERTIES = ["text", "section_heading",
                          "table_name", "product_name"]
-
-SYSTEM_PROMPT = (
-    "You are a helpful assistant. Answer the question using only the "
-    "provided context. If the answer isn't in the context, say you don't know."
-)
-
-PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([
-    ("system", SYSTEM_PROMPT),
-    ("human", "Context:\n{context}\n\nQuestion: {question}"),
-])
 
 
 def _object_to_chunk(obj) -> dict:
@@ -40,7 +27,7 @@ def _object_to_chunk(obj) -> dict:
     }
 
 
-def _search(collection, query: str, search_type: str, k: int, embeddings: OpenAIEmbeddings):
+def _run_search(collection, query: str, search_type: str, k: int, embeddings: OpenAIEmbeddings):
     if search_type == "keyword":
         search_result = collection.query.bm25(
             query=query, query_properties=BM25_QUERY_PROPERTIES, limit=k)
@@ -56,40 +43,34 @@ def _search(collection, query: str, search_type: str, k: int, embeddings: OpenAI
     else:
         raise ValueError(
             f"search_type must be one of 'keyword', 'vector', 'hybrid', got {search_type!r}")
-    return [_object_to_chunk(obj) for obj in search_result.objects]
+    return [_object_to_chunk(o) for o in search_result.objects]
 
 
-def ask_question(query: str, search_type: str = "hybrid", k: int = 8) -> dict:
+def search(query: str, collection: str, search_type: str = "hybrid", k: int = DEFAULT_TOP_K) -> list[dict]:
+    """Retrieval primitive used by the /retrieve endpoint (and by rag-retrieval
+    over HTTP). Owns the Weaviate connection and query embedding so that the
+    embedding model always matches what was used at ingestion time.
+
+    `collection` is required and must be one of config.ALL_COLLECTIONS —
+    there's no query-routing agent yet, so the caller must say which domain
+    to search.
+    """
+    if collection not in ALL_COLLECTIONS:
+        raise ValueError(
+            f"collection must be one of {ALL_COLLECTIONS}, got {collection!r}")
+
     client = weaviate.connect_to_local()
     try:
-        collection = client.collections.get(INDEX_NAME)
         embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
-
-        context_chunks = _search(collection, query, search_type, k, embeddings)
-        context_text = "\n\n".join(
-            f"[{c['doc_type']} | p.{c['page_number']} | {c['content_type']}"
-            f"{' | ' + c['table_name'] if c['table_name'] else ''}]\n{c['text']}"
-            for c in context_chunks
-        )
-
-        messages = PROMPT_TEMPLATE.format_messages(
-            context=context_text, question=query)
-
-        llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
-        response = llm.invoke(messages)
-
-        return {
-            "system_prompt": SYSTEM_PROMPT,
-            "context": context_chunks,
-            "question": query,
-            "search_type": search_type,
-            "answer": response.content,
-        }
+        coll = client.collections.get(collection)
+        return _run_search(coll, query, search_type, k, embeddings)
     finally:
         client.close()
 
 
 if __name__ == "__main__":
-    result = ask_question(
-        "What are the trouble shooting steps for  AuroraWatch Fit 3 ?")
-    print(result["answer"])
+    results = search(
+        "What are the trouble shooting steps for AuroraWatch Fit 3?",
+        collection="AURORA_TECHNICAL_SUPPORT")
+    for result_chunk in results:
+        print(result_chunk)

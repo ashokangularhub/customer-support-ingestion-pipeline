@@ -9,7 +9,7 @@ auto-schema so that:
   3. Numeric/date metadata (page_number, chunk_index, ingested_at, ...) get
      correct data types so filtering and aggregation behave predictably.
 """
-from config import INDEX_NAME
+from config import ALL_COLLECTIONS
 
 TEXT_KEY = "text"
 
@@ -17,6 +17,7 @@ _KEYWORD_TEXT_PROPS = [
     "source_file", "doc_type", "doc_title", "content_type",
     "table_name", "product_name", "product_id",
     "document_version", "last_review", "content_hash", "chunk_id",
+    "file_hash",
 ]
 
 _SEARCHABLE_TEXT_PROPS = ["section_heading"]
@@ -25,7 +26,7 @@ _INT_PROPS = ["page_number", "total_pages",
               "table_index", "chunk_index", "total_chunks", "char_count"]
 
 
-def build_schema(index_name: str = INDEX_NAME) -> dict:
+def build_schema(index_name: str) -> dict:
     properties = [
         {
             "name": TEXT_KEY,
@@ -78,12 +79,22 @@ def build_schema(index_name: str = INDEX_NAME) -> dict:
     }
 
 
-def reset_collection(client) -> None:
+def reset_collection(client, index_name: str) -> None:
     """Deletes the collection if it exists (used for a clean re-ingestion)."""
-    if client.collections.exists(INDEX_NAME):
-        client.collections.delete(INDEX_NAME)
+    if client.collections.exists(index_name):
+        client.collections.delete(index_name)
 
 
-def ensure_collection(client, index_name: str = INDEX_NAME) -> None:
+def ensure_collection(client, index_name: str) -> None:
     if not client.collections.exists(index_name):
         client.collections.create_from_dict(build_schema(index_name))
+
+
+def reset_all_collections(client) -> None:
+    for index_name in ALL_COLLECTIONS:
+        reset_collection(client, index_name)
+
+
+def ensure_all_collections(client) -> None:
+    for index_name in ALL_COLLECTIONS:
+        ensure_collection(client, index_name)

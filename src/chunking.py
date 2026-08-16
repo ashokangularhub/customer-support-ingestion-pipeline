@@ -73,10 +73,16 @@ def _table_chunks_text(table: TableBlock) -> list[str]:
     return chunks
 
 
+def compute_file_hash(file_path: str) -> str:
+    with open(file_path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
 def build_documents(file_path: str) -> list[Document]:
     file_name = os.path.basename(file_path)
     doc_type, doc_title = detect_doc_type(file_name)
     parsed: ParsedDocument = parse_pdf(file_path)
+    file_hash = compute_file_hash(file_path)
 
     base_metadata = {
         "source_file": file_name,
@@ -85,6 +91,7 @@ def build_documents(file_path: str) -> list[Document]:
         "total_pages": parsed.total_pages,
         "document_version": parsed.document_version or "",
         "last_review": parsed.last_review or "",
+        "file_hash": file_hash,
     }
 
     documents: list[Document] = []

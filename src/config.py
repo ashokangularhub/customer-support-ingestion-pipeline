@@ -1,10 +1,13 @@
 """Central configuration for the Aurora RAG ingestion pipeline."""
+import os
 import re
 
 INCOMING_FOLDER = r"D:\AI-Sessions\Langchain-RAG-Project\rag-files"
-INDEX_NAME = "AuroraRagDocuments"
 EMBEDDING_MODEL = "text-embedding-3-small"
 BATCH_SIZE = 100
+
+# Default number of chunks returned per retrieval call; overridable per request.
+DEFAULT_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
 
 # Narrative text chunking (RecursiveCharacterTextSplitter)
 TEXT_CHUNK_SIZE = 800
@@ -32,6 +35,22 @@ def detect_doc_type(file_name: str) -> tuple[str, str]:
         if needle in lowered:
             return doc_type, title
     return DEFAULT_DOC_TYPE, file_name
+
+
+# --- Per-document-type collections --------------------------------------------
+# Each source document gets its own Weaviate collection instead of one shared
+# collection, so retrieval/admin tooling can target (or exclude) a domain.
+COLLECTION_BY_DOC_TYPE = {
+    "product_catalog": "AURORA_PRODUCT",
+    "returns_refunds_policy": "AURORA_RETURNS_REFUNDS",
+    "technical_support_guide": "AURORA_TECHNICAL_SUPPORT",
+}
+DEFAULT_COLLECTION = "AURORA_GENERAL"
+ALL_COLLECTIONS = list(COLLECTION_BY_DOC_TYPE.values())
+
+
+def get_collection_name(doc_type: str) -> str:
+    return COLLECTION_BY_DOC_TYPE.get(doc_type, DEFAULT_COLLECTION)
 
 
 # --- Known product catalog (used to tag chunks with product_name/product_id) -
