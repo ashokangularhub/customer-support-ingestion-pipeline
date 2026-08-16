@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weaviate Data Browser</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Weaviate Data Browser</h1>
+    <div class="collection-picker">
+      <label for="collection-select">Collection</label>
+      <select id="collection-select"></select>
+      <span id="collection-count" class="badge"></span>
+    </div>
+  </header>
+
+  <section class="filters">
+    <div class="field">
+      <label for="filter-doc-type">Doc type</label>
+      <select id="filter-doc-type"><option value="">All</option></select>
+    </div>
+    <div class="field">
+      <label for="filter-content-type">Content type</label>
+      <select id="filter-content-type"><option value="">All</option></select>
+    </div>
+    <div class="field">
+      <label for="filter-source-file">Source file</label>
+      <select id="filter-source-file"><option value="">All</option></select>
+    </div>
+    <div class="field grow">
+      <label for="filter-search">Keyword search (BM25)</label>
+      <input id="filter-search" type="text" placeholder="Search text, headings, table names..." />
+    </div>
+    <div class="field">
+      <label for="page-size">Page size</label>
+      <select id="page-size">
+        <option>10</option>
+        <option selected>25</option>
+        <option>50</option>
+        <option>100</option>
+      </select>
+    </div>
+    <div class="field checkbox">
+      <label><input id="include-vector" type="checkbox" /> Include vector preview</label>
+    </div>
+  </section>
+
+  <section class="results">
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Type</th>
+          <th>Doc type</th>
+          <th>Section / Table</th>
+          <th>Text preview</th>
+          <th>Product</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+    <p id="empty-state" class="hidden">No objects match the current filters.</p>
+  </section>
+
+  <footer>
+    <button id="prev-page">&larr; Prev</button>
+    <span id="page-indicator"></span>
+    <button id="next-page">Next &rarr;</button>
+  </footer>
+
+  <div id="detail-overlay" class="overlay hidden">
+    <div class="detail-panel">
+      <button id="close-detail" class="close-btn">&times;</button>
+      <h2>Object detail</h2>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

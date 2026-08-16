@@ -1,0 +1,12 @@
+1) command to clear the vectors  --> 
+cd D:\AI-Sessions\Langchain-RAG-Project\rag-pipeline\src
+..\.venv\Scripts\python.exe -c "
+import weaviate
+client = weaviate.connect_to_local()
+if client.collections.exists('AuroraRagDocuments'):
+    client.collections.delete('AuroraRagDocuments')
+    print('Deleted collection: AuroraRagDocuments')
+else:
+    print('Collection does not exist (already clean)')
+client.close()
+"
