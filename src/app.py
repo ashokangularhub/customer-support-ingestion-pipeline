@@ -1,6 +1,8 @@
+import importlib
+import sys
 import threading
 from contextlib import asynccontextmanager
-
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -8,10 +10,21 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from admin_api import router as admin_router
-from config import ALL_COLLECTIONS, DEFAULT_TOP_K
-from ingestion import ingest_existing_files, start_watcher
-from query import search
+# Make this file's own directory importable regardless of cwd/how it's
+# launched, and import local flat modules dynamically (not via `from X
+# import Y`) so editor "organize imports" actions can't reorder them above
+# this sys.path bootstrap.
+_SRC = Path(__file__).resolve().parent
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+admin_router = importlib.import_module("admin_api").router
+_config = importlib.import_module("config")
+ALL_COLLECTIONS, DEFAULT_TOP_K = _config.ALL_COLLECTIONS, _config.DEFAULT_TOP_K
+_ingestion = importlib.import_module("ingestion")
+ingest_existing_files = _ingestion.ingest_existing_files
+start_watcher = _ingestion.start_watcher
+search = importlib.import_module("query").search
 
 
 @asynccontextmanager
@@ -23,7 +36,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RAG Pipeline API", lifespan=lifespan)
 app.include_router(admin_router)
-app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
+app.mount("/ui", StaticFiles(directory=str(_SRC / "static"), html=True), name="ui")
 
 
 class RetrieveRequest(BaseModel):
