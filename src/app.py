@@ -1,4 +1,5 @@
 import importlib
+import logging
 import sys
 import threading
 from contextlib import asynccontextmanager
@@ -25,6 +26,12 @@ _ingestion = importlib.import_module("ingestion")
 ingest_existing_files = _ingestion.ingest_existing_files
 start_watcher = _ingestion.start_watcher
 search = importlib.import_module("query").search
+RequestResponseLoggingMiddleware = importlib.import_module(
+    "logging_middleware").RequestResponseLoggingMiddleware
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 
 
 @asynccontextmanager
@@ -35,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RAG Pipeline API", lifespan=lifespan)
+app.add_middleware(RequestResponseLoggingMiddleware)
 app.include_router(admin_router)
 app.mount("/ui", StaticFiles(directory=str(_SRC / "static"), html=True), name="ui")
 
