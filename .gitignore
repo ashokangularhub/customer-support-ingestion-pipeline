@@ -13,3 +13,4 @@ venv/
 
 # Debug output
 src/rag_chunking_debug.txt
+documents/
