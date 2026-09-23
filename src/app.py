@@ -25,7 +25,8 @@ ALL_COLLECTIONS, DEFAULT_TOP_K = _config.ALL_COLLECTIONS, _config.DEFAULT_TOP_K
 _ingestion = importlib.import_module("ingestion")
 ingest_existing_files = _ingestion.ingest_existing_files
 start_watcher = _ingestion.start_watcher
-search = importlib.import_module("query").search
+_query = importlib.import_module("query")
+search = _query.search
 RequestResponseLoggingMiddleware = importlib.import_module(
     "logging_middleware").RequestResponseLoggingMiddleware
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     ingest_existing_files()
     threading.Thread(target=start_watcher, daemon=True).start()
     yield
+    _query.close_client()
 
 
 app = FastAPI(title="RAG Pipeline API", lifespan=lifespan)

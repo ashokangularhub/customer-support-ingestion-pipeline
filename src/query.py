@@ -1,3 +1,5 @@
+import threading
+
 import weaviate
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
@@ -11,6 +13,42 @@ HYBRID_ALPHA = 0.75
 
 BM25_QUERY_PROPERTIES = ["text", "section_heading",
                          "table_name", "product_name"]
+
+# Reconnecting to Weaviate on every /retrieve call cost ~10-12s (Windows
+# localhost resolution/handshake overhead), which alone blew past downstream
+# 30s timeouts. Cache one shared client + embeddings instance at module level
+# instead, guarded by a lock so concurrent first requests don't double-connect.
+_client = None
+_embeddings = None
+_client_lock = threading.Lock()
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                # host="127.0.0.1" explicitly to skip the IPv6 (::1)
+                # first-try-then-fallback delay "localhost" can trigger on Windows.
+                _client = weaviate.connect_to_local(host="127.0.0.1")
+    return _client
+
+
+def _get_embeddings() -> OpenAIEmbeddings:
+    global _embeddings
+    if _embeddings is None:
+        with _client_lock:
+            if _embeddings is None:
+                _embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    return _embeddings
+
+
+def close_client() -> None:
+    """Call on app shutdown to release the shared Weaviate connection."""
+    global _client
+    if _client is not None:
+        _client.close()
+        _client = None
 
 
 def _object_to_chunk(obj) -> dict:
@@ -59,13 +97,10 @@ def search(query: str, collection: str, search_type: str = "hybrid", k: int = DE
         raise ValueError(
             f"collection must be one of {ALL_COLLECTIONS}, got {collection!r}")
 
-    client = weaviate.connect_to_local()
-    try:
-        embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
-        coll = client.collections.get(collection)
-        return _run_search(coll, query, search_type, k, embeddings)
-    finally:
-        client.close()
+    client = _get_client()
+    embeddings = _get_embeddings()
+    coll = client.collections.get(collection)
+    return _run_search(coll, query, search_type, k, embeddings)
 
 
 if __name__ == "__main__":
